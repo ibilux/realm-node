@@ -20,6 +20,8 @@
 // With great contributions to @akim95 on github
 
 /// <reference path="./app.d.ts"/>
+/// <reference path="./decorators.d.ts"/>
+/// <reference path="./types.d.ts"/>
 
 declare namespace Realm {
   interface CollectionChangeSet {
@@ -54,6 +56,7 @@ declare namespace Realm {
 
   /**
    * ObjectSchemaProperty
+   * This is the structure of a schema as input when configuring a Realm
    * @see { @link https://realm.io/docs/javascript/latest/api/Realm.html#~ObjectSchemaProperty }
    */
   interface ObjectSchemaProperty {
@@ -66,9 +69,28 @@ declare namespace Realm {
     mapTo?: string;
   }
 
+  /**
+   * CanonicalObjectSchemaProperty
+   * This depicts the structure of a schema retrieved from a Realm
+   * @see { @link https://realm.io/docs/javascript/latest/api/Realm.html#~CanonicalObjectSchemaProperty }
+   */
+  interface CanonicalObjectSchemaProperty {
+    name: string;
+    type: PropertyType;
+    objectType?: string;
+    property?: string;
+    optional: boolean;
+    indexed: boolean;
+    mapTo: string;
+  }
+
   // properties types
   interface PropertiesTypes {
-    [keys: string]: PropertyType | ObjectSchemaProperty | ObjectSchema;
+    [keys: string]: ObjectSchemaProperty | PropertyType;
+  }
+
+  interface CanonicalPropertiesTypes {
+    [keys: string]: CanonicalObjectSchemaProperty;
   }
 
   enum UpdateMode {
@@ -81,20 +103,30 @@ declare namespace Realm {
    * ObjectSchema
    * @see { @link https://realm.io/docs/javascript/latest/api/Realm.html#~ObjectSchema }
    */
-  interface ObjectSchema {
+
+  interface BaseObjectSchema {
     name: string;
     primaryKey?: string;
     embedded?: boolean;
+    asymmetric?: boolean;
+  }
+
+  interface ObjectSchema extends BaseObjectSchema {
     properties: PropertiesTypes;
+  }
+
+  interface CanonicalObjectSchema extends BaseObjectSchema {
+    properties: CanonicalPropertiesTypes;
   }
 
   /**
    * ObjectClass
    * @see { @link https://realm.io/docs/javascript/latest/api/Realm.html#~ObjectClass }
    */
-  interface ObjectClass {
-    schema: ObjectSchema;
-  }
+  type ObjectClass<T extends Realm.Object<T> = any> = {
+    new (...args: any): Realm.Object<T>;
+    schema?: ObjectSchema;
+  };
 
   type PrimaryKey = number | string | Realm.BSON.ObjectId | Realm.BSON.UUID;
 
@@ -123,25 +155,97 @@ declare namespace Realm {
   interface SSLConfiguration {
     validate?: boolean;
     certificatePath?: string;
-    validateCallback?: SSLVerifyCallback;
+    validateCertificates?: SSLVerifyCallback;
   }
 
-  interface SyncConfiguration {
+  enum ClientResetMode {
+    Manual = 'manual',
+    DiscardLocal = 'discardLocal'
+  }
+
+  type ClientResetBeforeCallback = (localRealm: Realm) => void;
+  type ClientResetAfterCallback = (localRealm: Realm, remoteRealm: Realm) => void;
+  interface ClientResetConfiguration<ClientResetModeT = ClientResetMode> {
+    mode: ClientResetModeT;
+    onBefore?: ClientResetBeforeCallback;
+    onAfter?: ClientResetAfterCallback;
+  }
+
+  interface BaseSyncConfiguration {
     user: User;
-    partitionValue: Realm.App.Sync.PartitionValue;
     customHttpHeaders?: { [header: string]: string };
-    newRealmFileBehavior?: OpenRealmBehaviorConfiguration;
-    existingRealmFileBehavior?: OpenRealmBehaviorConfiguration;
     ssl?: SSLConfiguration;
     _sessionStopPolicy?: SessionStopPolicy;
-    error?: ErrorCallback;
+    newRealmFileBehavior?: OpenRealmBehaviorConfiguration;
+    existingRealmFileBehavior?: OpenRealmBehaviorConfiguration;
+    onError?: ErrorCallback;
   }
+
+  // We only allow `flexible` to be `true` or `undefined` - `{ flexible: false }`
+  // is not allowed. This is because TypeScript cannot discriminate that
+  // type correctly with `strictNullChecks` disabled, and there's no real use
+  // case for `{ flexible: false }`.
+  interface FlexibleSyncConfiguration extends BaseSyncConfiguration {
+    flexible: true;
+    partitionValue?: never;
+    clientReset?: ClientResetConfiguration<ClientResetMode.Manual>;
+    /**
+     * Optional object to configure the setup of an initial set of flexible
+     * sync subscriptions to be used when opening the Realm. If this is specified,
+     * {@link Realm.open} will not resolve until this set of subscriptions has been
+     * fully synchronized with the server.
+     *
+     * Example:
+     * ```
+     * const config: Realm.Configuration = {
+     *   sync: {
+     *     user,
+     *     flexible: true,
+     *     initialSubscriptions: {
+     *       update: (subs, realm) => {
+     *         subs.add(realm.objects('Task'));
+     *       },
+     *       rerunOnOpen: true,
+     *     },
+     *   },
+     *   // ... rest of config ...
+     * };
+     * const realm = await Realm.open(config);
+     *
+     * // At this point, the Realm will be open with the data for the initial set
+     * // subscriptions fully synchronised.
+     * ```
+     */
+    initialSubscriptions?: {
+      /**
+       * Callback called with the {@link Realm} instance to allow you to setup the
+       * initial set of subscriptions by calling `realm.subscriptions.update`.
+       * See {@link Realm.App.Sync.SubscriptionSet.update} for more information.
+       */
+      update: (subs: Realm.App.Sync.MutableSubscriptionSet, realm: Realm) => void;
+      /**
+       * If `true`, the {@link update} callback will be rerun every time the Realm is
+       * opened (e.g. every time a user opens your app), otherwise (by default) it
+       * will only be run if the Realm does not yet exist.
+       */
+      rerunOnOpen?: boolean;
+    };
+  }
+
+  interface PartitionSyncConfiguration extends BaseSyncConfiguration {
+    flexible?: never;
+    partitionValue: Realm.App.Sync.PartitionValue;
+    clientReset?: ClientResetConfiguration<ClientResetMode>;
+  }
+
+  type SyncConfiguration = FlexibleSyncConfiguration | PartitionSyncConfiguration;
 
   interface BaseConfiguration {
     encryptionKey?: ArrayBuffer | ArrayBufferView | Int8Array;
     schema?: (ObjectClass | ObjectSchema)[];
     schemaVersion?: number;
-    shouldCompactOnLaunch?: (totalBytes: number, usedBytes: number) => boolean;
+    shouldCompact?: (totalBytes: number, usedBytes: number) => boolean;
+    onFirstOpen?: (realm: Realm) => void;
     path?: string;
     fifoFilesFallbackPath?: string;
     readOnly?: boolean;
@@ -149,7 +253,7 @@ declare namespace Realm {
 
   interface ConfigurationWithSync extends BaseConfiguration {
     sync: SyncConfiguration;
-    migration?: never;
+    onMigration?: never;
     inMemory?: never;
     deleteRealmIfMigrationNeeded?: never;
     disableFormatUpgrade?: never;
@@ -157,7 +261,7 @@ declare namespace Realm {
 
   interface ConfigurationWithoutSync extends BaseConfiguration {
     sync?: never;
-    migration?: MigrationCallback;
+    onMigration?: MigrationCallback;
     inMemory?: boolean;
     deleteRealmIfMigrationNeeded?: boolean;
     disableFormatUpgrade?: boolean;
@@ -179,18 +283,48 @@ declare namespace Realm {
     [keys: string]: any;
   }
 
-  interface ObjectChangeSet {
+  interface ObjectChangeSet<T> {
     deleted: boolean;
-    changedProperties: string[];
+    changedProperties: (keyof T)[];
   }
 
-  type ObjectChangeCallback = (object: Object, changes: ObjectChangeSet) => void;
+  type ObjectChangeCallback<T> = (object: T, changes: ObjectChangeSet<T>) => void;
 
   /**
-   * Object
-   * @see { @link https://realm.io/docs/javascript/latest/api/Realm.Object.html }
+   * Base class for a Realm Object.
+   * @see
+   * {@link https://realm.io/docs/javascript/latest/api/Realm.Object.html}
+   *
+   * @example
+   * To define a class `Person` which requires the `name` and `age` properties to be
+   * specified when it is being constructed, using the Realm Babel plugin to allow
+   * Typescript-only model definitions (otherwise it would require a `static` schema):
+   * ```
+   * class Person extends Realm.Object<Person, "name" | "age"> {
+   *   _id = new Realm.Types.ObjectId();
+   *   name: string;
+   *   age: Realm.Types.Int;
+   * }
+   * ```
+   *
+   * @typeParam `T` - The type of this class (e.g. if your class is `Person`,
+   * `T` should also be `Person` - this duplication is required due to how
+   * TypeScript works)
+   *
+   * @typeParam `RequiredProperties` - The names of any properties of this
+   * class which are required when an instance is constructed with `new`. Any
+   * properties not specified will be optional, and will default to a sensible
+   * null value if no default is specified elsewhere.
    */
-  abstract class Object {
+  abstract class Object<
+    T = unknown,
+    RequiredProperties extends keyof OmittedRealmTypes<T> = never
+  > {
+    /**
+     * Creates a new object in the database.
+     */
+    constructor(realm: Realm, values: Unmanaged<T, RequiredProperties>);
+
     /**
      * @returns An array of the names of the object's properties.
      */
@@ -202,9 +336,9 @@ declare namespace Realm {
     entries(): [string, any][];
 
     /**
-     * @returns An object for JSON serialization.
+     * @returns A plain object for JSON serialization.
      */
-    toJSON(): any;
+    toJSON(): Record<string, unknown>;
 
     /**
      * @returns boolean
@@ -226,14 +360,14 @@ declare namespace Realm {
      */
     linkingObjectsCount(): number;
 
-    _objectId(): string;
+    _objectKey(): string;
 
     /**
      * @returns void
      */
-    addListener(callback: ObjectChangeCallback): void;
+    addListener(callback: ObjectChangeCallback<T>): void;
 
-    removeListener(callback: ObjectChangeCallback): void;
+    removeListener(callback: ObjectChangeCallback<T>): void;
 
     removeAllListeners(): void;
 
@@ -241,19 +375,32 @@ declare namespace Realm {
      * @returns string
      */
     getPropertyType(propertyName: string): string;
+
+    /**
+     * Optionally specify the name of the schema when using @realm/babel-plugin
+     */
+    static name?: string;
+
+    /**
+     * Optionally specify the primary key of the schema when using @realm/babel-plugin
+     */
+    static primaryKey?: string;
+
+    /**
+     * Optionally specify that the schema is an embedded schema when using @realm/babel-plugin
+     */
+    static embedded?: boolean;
+
+    /**
+     * Optionally specify that the schema should sync unidirectionally if using flexible sync when using @realm/babel-plugin
+     */
+    static asymmetric?: boolean;
   }
-
-  /**
-   * JsonSerializationReplacer solves circular structures when serializing Realm entities
-   * @example JSON.stringify(realm.objects("Person"), Realm.JsonSerializationReplacer)
-   */
-  const JsonSerializationReplacer: (key: string, val: any) => any;
-
   /**
    * SortDescriptor
    * @see { @link https://realm.io/docs/javascript/latest/api/Realm.Collection.html#~SortDescriptor }
    */
-  type SortDescriptor = [string] | [string, boolean];
+  type SortDescriptor = string | [string, boolean];
 
   /**
    * Dictionary
@@ -296,6 +443,11 @@ declare namespace Realm {
     addListener(callback: DictionaryChangeCallback): void;
     removeListener(callback: DictionaryChangeCallback): void;
     removeAllListeners(): void;
+
+    /**
+     * @returns A plain object for JSON serialization.
+     */
+    toJSON(): Record<string, unknown>;
   }
 
   /**
@@ -307,9 +459,9 @@ declare namespace Realm {
     readonly optional: boolean;
 
     /**
-     * @returns An object for JSON serialization.
+     * @returns An array of plain objects for JSON serialization.
      */
-    toJSON(): Array<any>;
+    toJSON(): Array<Record<string, unknown>>;
 
     description(): string;
 
@@ -323,10 +475,10 @@ declare namespace Realm {
      */
     isEmpty(): boolean;
 
-    min(property?: string): number | Date | null;
-    max(property?: string): number | Date | null;
-    sum(property?: string): number | null;
-    avg(property?: string): number;
+    min(property?: string): number | Date | undefined;
+    max(property?: string): number | Date | undefined;
+    avg(property?: string): number | undefined;
+    sum(property?: string): number;
 
     /**
      * @param  {string} query
@@ -478,6 +630,9 @@ declare namespace Realm {
     code: number;
   }
 
+  /**
+   * @deprecated
+   */
   interface ClientResetError {
     name: 'ClientReset';
     path: string;
@@ -515,9 +670,23 @@ declare namespace Realm {
     Connected = 'connected'
   }
 
+  enum SessionState {
+    Invalid = 'invalid',
+    Active = 'active',
+    Inactive = 'inactive'
+  }
+
+  enum ProgressDirection {
+    Download = 'download',
+    Upload = 'upload'
+  }
+
+  enum ProgressMode {
+    ReportIndefinitely = 'reportIndefinitely',
+    ForCurrentlyOutstandingWork = 'forCurrentlyOutstandingWork'
+  }
+
   type ProgressNotificationCallback = (transferred: number, transferable: number) => void;
-  type ProgressDirection = 'download' | 'upload';
-  type ProgressMode = 'reportIndefinitely' | 'forCurrentlyOutstandingWork';
 
   type ConnectionNotificationCallback = (
     newState: ConnectionState,
@@ -527,7 +696,7 @@ declare namespace Realm {
   namespace App.Sync {
     class Session {
       readonly config: SyncConfiguration;
-      readonly state: 'invalid' | 'active' | 'inactive';
+      readonly state: SessionState;
       readonly url: string;
       readonly user: User;
       readonly connectionState: ConnectionState;
@@ -606,6 +775,296 @@ declare namespace Realm {
      * The default behavior settings if you want to wait for downloading a synchronized Realm to complete before opening it.
      */
     const downloadBeforeOpenBehavior: OpenRealmBehaviorConfiguration;
+
+    /**
+     * Class representing a single query subscription in a set of flexible sync
+     * {@link SubscriptionSet}. This class contains readonly information about the
+     * subscription – any changes to the set of subscriptions must be carried out
+     * in a {@link SubscriptionSet.update} callback.
+     */
+    class Subscription {
+      new(): never; // This type isn't supposed to be constructed manually by end users.
+
+      /**
+       * @returns The ObjectId of the subscription
+       */
+      readonly id: BSON.ObjectId;
+
+      /**
+       * @returns The date when this subscription was created
+       */
+      readonly createdAt: Date;
+
+      /**
+       * @returns The date when this subscription was last updated
+       */
+      readonly updatedAt: Date;
+
+      /**
+       * @returns The name given to this subscription when it was created.
+       * If no name was set, this will return null.
+       */
+      readonly name: string | null;
+
+      /**
+       * @returns The type of objects the subscription refers to.
+       */
+      readonly objectType: string;
+
+      /**
+       * @returns The string representation of the query the subscription was created with.
+       * If no filter or sort was specified, this will return "TRUEPREDICATE".
+       */
+      readonly queryString: string;
+    }
+
+    /**
+     * Enum representing the state of a {@link SubscriptionSet} set.
+     */
+    enum SubscriptionsState {
+      /**
+       * The subscription update has been persisted locally, but the server hasn't
+       * yet returned all the data that matched the updated subscription queries.
+       */
+      Pending = 'pending',
+
+      /**
+       * The server has acknowledged the subscription and sent all the data that
+       * matched the subscription queries at the time the SubscriptionSet was
+       * updated. The server is now in steady-state synchronization mode where it
+       * will stream updates as they come.
+       */
+      Complete = 'complete',
+
+      /**
+       * The server has returned an error and synchronization is paused for this
+       * Realm. To view the actual error, use `Subscriptions.error`.
+       *
+       * You can still use {@link SubscriptionSet.update} to update the subscriptions,
+       * and if the new update doesn't trigger an error, synchronization
+       * will be restarted.
+       */
+      Error = 'error',
+
+      /**
+       * The SubscriptionSet has been superseded by an updated one. This typically means
+       * that someone has called {@link SubscriptionSet.update} on a different instance
+       * of the `Subscriptions`. You should not use a superseded SubscriptionSet,
+       * and instead obtain a new instance from {@link Realm.subscriptions}.
+       */
+      Superseded = 'superseded'
+    }
+
+    /**
+     * Options for {@link SubscriptionSet.add}.
+     */
+    interface SubscriptionOptions {
+      /**
+       * Sets the name of the subscription being added. This allows you to later refer
+       * to the subscription by name, e.g. when calling {@link MutableSubscriptionSet.removeByName}.
+       */
+      name?: string;
+
+      /**
+       * By default, adding a subscription with the same name as an existing one
+       * but a different query will update the existing subscription with the new
+       * query. If `throwOnUpdate` is set to true, adding a subscription with the
+       * same name but a different query will instead throw an exception.
+       * Adding a subscription with the same name and query is always a no-op.
+       */
+      throwOnUpdate?: boolean;
+    }
+
+    /**
+     * Class representing the common functionality for the {@link SubscriptionSet} and
+     * {@link MutableSubscriptionSet} classes.
+     *
+     * The {@link Subscription}s in a SubscriptionSet can be accessed as an array, e.g.
+     * `realm.subscriptions[0]`. This array is readonly – SubscriptionSets can only be
+     * modified inside a {@link SubscriptionSet.update} callback.
+     */
+    interface BaseSubscriptionSet extends ReadonlyArray<Subscription> {
+      new (): never; // This type isn't supposed to be constructed manually by end users.
+
+      // /**
+      //  * @returns A readonly array snapshot of all the subscriptions in the set.
+      //  * Any changes to the set of subscriptions must be performed in an {@link update}
+      //  * callback.
+      //  */
+      // [key:number]: Subscription;
+
+      /**
+       * @returns `true` if there are no subscriptions in the set, `false` otherwise.
+       */
+      readonly isEmpty: boolean;
+
+      /**
+       * @returns The version of the SubscriptionSet. This is incremented every time an
+       * {@link update} is applied.
+       */
+      readonly version: number;
+
+      /**
+       * Find a subscription by name.
+       *
+       * @param name The name to search for.
+       * @returns The named subscription, or `null` if the subscription is not found.
+       */
+      findByName(name: string): Subscription | null;
+
+      /**
+       * Find a subscription by query. Will match both named and unnamed subscriptions.
+       *
+       * @param query The query to search for, represented as a {@link Realm.Results} instance,
+       * e.g. `Realm.objects("Cat").filtered("age > 10")`.
+       * @returns The subscription with the specified query, or null if the subscription is not found.
+       */
+      findByQuery<T>(query: Realm.Results<T & Realm.Object>): Subscription | null;
+
+      /**
+       * @returns The state of the SubscriptionSet.
+       */
+      readonly state: SubscriptionsState;
+
+      /**
+       * @returns If `state` is {@link Realm.App.Sync.SubscriptionsState.Error}, this will return a `string`
+       * representing why the SubscriptionSet is in an error state. `null` is returned if there is no error.
+       */
+      readonly error: string | null;
+    }
+
+    /**
+     * Class representing the set of all active flexible sync subscriptions for a Realm
+     * instance.
+     *
+     * The server will continuously evaluate the queries that the instance is subscribed to
+     * and will send data that matches them, as well as remove data that no longer does.
+     *
+     * The set of subscriptions can only be updated inside a {@link SubscriptionSet.update} callback,
+     * by calling methods on the corresponding {@link MutableSubscriptionSet} instance.
+     */
+    interface SubscriptionSet extends BaseSubscriptionSet {
+      /**
+       * Wait for the server to acknowledge this set of subscriptions and return the
+       * matching objects.
+       *
+       * If `state` is {@link SubscriptionsState.Complete}, the promise will be resolved immediately.
+       *
+       * If `state` is {@link SubscriptionsState.Error}, the promise will be rejected immediately.
+       *
+       * @returns A promise which is resolved when synchronization is complete, or is
+       * rejected if there is an error during synchronisation.
+       */
+      waitForSynchronization: () => Promise<void>;
+
+      /**
+       * Update the SubscriptionSet and change this instance to point to the updated SubscriptionSet.
+       *
+       * Adding or removing subscriptions from the set must be performed inside
+       * the callback argument of this method, and the mutating methods must be called on
+       * the `mutableSubs` argument rather than the original {@link SubscriptionSet} instance.
+       *
+       * Any changes to the subscriptions after the callback has executed will be batched and sent
+       * to the server. You can either `await` the call to `update`, or call {@link waitForSynchronization}
+       * to wait for the new data to be available.
+       *
+       * Example:
+       * ```
+       * await realm.subscriptions.update(mutableSubs => {
+       *   mutableSubs.add(realm.objects("Cat").filtered("age > 10"));
+       *   mutableSubs.add(realm.objects("Dog").filtered("age > 20"));
+       *   mutableSubs.removeByName("personSubs");
+       * });
+       * // `realm` will now return the expected results based on the updated subscriptions
+       * ```
+       *
+       * @param callback A callback function which receives a
+       * {@link Realm.App.Sync.MutableSubscriptionSet} instance as the
+       * first argument, which can be used to add or remove subscriptions
+       * from the set, and the {@link Realm} associated with the SubscriptionSet
+       * as the second argument (mainly useful when working with
+       * `initialSubscriptions` in
+       * {@link Realm.App.Sync.FlexibleSyncConfiguration}).
+       *
+       * @returns A promise which resolves when the SubscriptionSet is synchronized, or is rejected
+       * if there was an error during synchronization (see {@link waitForSynchronisation})
+       */
+      update: (
+        callback: (mutableSubs: MutableSubscriptionSet, realm: Realm) => void
+      ) => Promise<void>;
+    }
+
+    const SubscriptionSet: {
+      new (): never; // This type isn't supposed to be constructed manually by end users.
+      readonly prototype: SubscriptionSet;
+    };
+
+    /**
+     * The mutable version of a given SubscriptionSet. The mutable methods of a given
+     * {@link SubscriptionSet} instance can only be accessed from inside the {@link SubscriptionSet.update}
+     * callback.
+     */
+    interface MutableSubscriptionSet extends BaseSubscriptionSet {
+      new (): never; // This type isn't supposed to be constructed manually by end users.
+
+      /**
+       * Adds a query to the set of active subscriptions. The query will be joined via
+       * an `OR` operator with any existing queries for the same type.
+       *
+       * A query is represented by a {@link Realm.Results} instance returned from {@link Realm.objects},
+       * for example: `mutableSubs.add(realm.objects("Cat").filtered("age > 10"));`.
+       *
+       * @param query A {@link Realm.Results} instance representing the query to subscribe to.
+       * @param options An optional {@link SubscriptionOptions} object containing options to
+       * use when adding this subscription (e.g. to give the subscription a name).
+       * @returns A `Subscription` instance for the new subscription.
+       */
+      add: (query: Realm.Results<unknown>, options?: SubscriptionOptions) => Subscription;
+
+      /**
+       * Removes a subscription with the given query from the SubscriptionSet.
+       *
+       * @param query A {@link Realm.Results} instance representing the query to remove a subscription to.
+       * @returns `true` if the subscription was removed, `false` if it was not found.
+       */
+      remove: (query: Realm.Results<unknown>) => boolean;
+
+      /**
+       * Removes a subscription with the given name from the SubscriptionSet.
+       *
+       * @param name The name of the subscription to remove.
+       * @returns `true` if the subscription was removed, `false` if it was not found.
+       */
+      removeByName: (name: string) => boolean;
+
+      /**
+       * Removes the specified subscription from the SubscriptionSet.
+       *
+       * @param subscription The {@link Subscription} instance to remove.
+       * @returns `true` if the subscription was removed, `false` if it was not found.
+       */
+      removeSubscription: (subscription: Subscription) => boolean;
+
+      /**
+       * Removes all subscriptions for the specified object type from the SubscriptionSet.
+       *
+       * @param objectType The string name of the object type to remove all subscriptions for.
+       * @returns The number of subscriptions removed.
+       */
+      removeByObjectType: (objectType: string) => number;
+
+      /**
+       * Removes all subscriptions from the SubscriptionSet.
+       *
+       * @returns The number of subscriptions removed.
+       */
+      removeAll: () => number;
+    }
+
+    const MutableSubscriptionSet: {
+      new (): never; // This type isn't supposed to be constructed manually by end users.
+      readonly prototype: MutableSubscriptionSet;
+    };
   }
 
   namespace BSON {
@@ -630,11 +1089,11 @@ type ExtractPropertyNamesOfType<T, PropType> = {
 }[keyof T];
 
 /**
- * Exchanges properties defined as Realm.List<Model> with an optional Array<Model | RealmInsertionModel<Model>>.
+ * Exchanges properties defined as Realm.List<Model> with an optional Array<Model | Unmanaged<Model>>.
  */
 type RealmListsRemappedModelPart<T> = {
   [K in ExtractPropertyNamesOfType<T, Realm.List<any>>]?: T[K] extends Realm.List<infer GT>
-    ? Array<GT | RealmInsertionModel<GT>>
+    ? Array<GT | Unmanaged<GT>>
     : never;
 };
 
@@ -658,26 +1117,49 @@ type OmittedRealmTypes<T> = Omit<
   | ExtractPropertyNamesOfType<T, Realm.Dictionary>
 >;
 
+/** Make all fields optional except those specified in K */
+type OptionalExcept<T, K extends keyof T> = Partial<T> & Pick<T, K>;
+
+/**
+ * Omits all properties of a model which are not defined by the schema,
+ * making all properties optional except those specified in RequiredProperties.
+ */
+type OmittedRealmTypesWithRequired<
+  T,
+  RequiredProperties extends keyof OmittedRealmTypes<T>
+> = OptionalExcept<OmittedRealmTypes<T>, RequiredProperties>;
+
 /** Remaps realm types to "simpler" types (arrays and objects) */
 type RemappedRealmTypes<T> = RealmListsRemappedModelPart<T> & RealmDictionaryRemappedModelPart<T>;
 
 /**
  * Joins T stripped of all keys which value extends Realm.Collection and all inherited from Realm.Object,
- * with only the keys which value extends Realm.List, remapped as Arrays.
+ * with only the keys which value extends Realm.List, remapped as Arrays. All properties are optional
+ * except those specified in RequiredProperties.
  */
-type RealmInsertionModel<T> = OmittedRealmTypes<T> & RemappedRealmTypes<T>;
+type Unmanaged<
+  T,
+  RequiredProperties extends keyof OmittedRealmTypes<T> = never
+> = OmittedRealmTypesWithRequired<T, RequiredProperties> & RemappedRealmTypes<T>;
+
 declare class Realm {
   static defaultPath: string;
 
-  readonly empty: boolean;
+  readonly isEmpty: boolean;
   readonly path: string;
-  readonly readOnly: boolean;
-  readonly schema: Realm.ObjectSchema[];
+  readonly isReadOnly: boolean;
+  readonly schema: Realm.CanonicalObjectSchema[];
   readonly schemaVersion: number;
   readonly isInTransaction: boolean;
   readonly isClosed: boolean;
 
   readonly syncSession: Realm.App.Sync.Session | null;
+
+  /**
+   * Get the latest set of flexible sync subscriptions.
+   * @throws if flexible sync is not enabled for this app
+   */
+  readonly subscriptions: Realm.App.Sync.SubscriptionSet;
 
   /**
    * Get the current schema version of the Realm at the given path.
@@ -706,7 +1188,29 @@ declare class Realm {
   static deleteFile(config: Realm.Configuration): void;
 
   /**
-   * Copy all bundled Realm files to app's default file folder.
+   * Copy any Realm files  (i.e. `*.realm`) bundled with the application from the application
+   * directory into the application's documents directory, so that they can be opened and used
+   * by Realm. If the file already exists in the documents directory, it will not be
+   * overwritten, so this can safely be called multiple times.
+   *
+   * This should be called before opening the Realm, in order to move the bundled Realm
+   * files into a place where they can be written to, for example:
+   *
+   * ```
+   * // Given a bundled file, example.realm, this will copy example.realm (and any other .realm files)
+   * // from the app bundle into the app's documents directory. If the file already exists, it will
+   * // not be overwritten, so it is safe to call this every time the app starts.
+   * Realm.copyBundledRealmFiles();
+   *
+   * const realm = await Realm.open({
+   *   // This will open example.realm from the documents directory, with the bundled data in.
+   *   path: "example.realm"
+   * });
+   * ```
+   *
+   * This is only implemented for React Native.
+   *
+   * @throws {Error} If an I/O error occured or method is not implemented.
    */
   static copyBundledRealmFiles(): void;
 
@@ -744,12 +1248,12 @@ declare class Realm {
    */
   create<T>(
     type: string,
-    properties: RealmInsertionModel<T>,
+    properties: Unmanaged<T>,
     mode?: Realm.UpdateMode.Never
   ): T & Realm.Object;
   create<T>(
     type: string,
-    properties: Partial<T> | Partial<RealmInsertionModel<T>>,
+    properties: Partial<T> | Partial<Unmanaged<T>>,
     mode: Realm.UpdateMode.All | Realm.UpdateMode.Modified
   ): T & Realm.Object;
 
@@ -761,12 +1265,12 @@ declare class Realm {
    */
   create<T extends Realm.Object>(
     type: { new (...arg: any[]): T },
-    properties: RealmInsertionModel<T>,
+    properties: Unmanaged<T>,
     mode?: Realm.UpdateMode.Never
   ): T;
   create<T extends Realm.Object>(
     type: { new (...arg: any[]): T },
-    properties: Partial<T> | Partial<RealmInsertionModel<T>>,
+    properties: Partial<T> | Partial<Unmanaged<T>>,
     mode: Realm.UpdateMode.All | Realm.UpdateMode.Modified
   ): T;
 
@@ -789,9 +1293,9 @@ declare class Realm {
   /**
    * @param  {string} type
    * @param  {number|string|ObjectId|UUID} key
-   * @returns {T | undefined}
+   * @returns {T | null}
    */
-  objectForPrimaryKey<T>(type: string, key: Realm.PrimaryKey): (T & Realm.Object) | undefined;
+  objectForPrimaryKey<T>(type: string, key: Realm.PrimaryKey): (T & Realm.Object) | null;
 
   /**
    * @param  {Class} type
@@ -807,7 +1311,7 @@ declare class Realm {
   objectForPrimaryKey<T>(
     type: string | { new (...arg: any[]): T },
     key: Realm.PrimaryKey
-  ): (T & Realm.Object) | undefined;
+  ): (T & Realm.Object<T>) | undefined;
 
   /**
    * @param  {string} type
@@ -879,12 +1383,17 @@ declare class Realm {
   compact(): boolean;
 
   /**
-   * Write a copy to destination path
-   * @param path destination path
-   * @param encryptionKey encryption key to use
-   * @returns void
+   * Writes a compacted copy of the Realm with the given configuration.
+   *
+   * The destination file cannot already exist.
+   * All conversions between synced and non-synced Realms are supported, and will be
+   * performed according to the `config` parameter, which describes the desired output.
+   *
+   * Note that if this method is called from within a write transaction, the current data is written,
+   * not the data from the point when the previous write transaction was committed.
+   * @param {Realm~Configuration} config Realm configuration that describes the output realm.
    */
-  writeCopyTo(path: string, encryptionKey?: ArrayBuffer | ArrayBufferView): void;
+  writeCopyTo(config: Realm.Configuration): void;
 
   /**
    * Update the schema of the Realm.

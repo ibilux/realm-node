@@ -124,6 +124,10 @@ declare namespace Realm {
          * When true, creates a new document if no document matches the query.
          */
         readonly upsert?: boolean;
+        /**
+         * Array Filters
+         */
+        readonly arrayFilters?: Filter[];
       }
 
       /**
@@ -523,6 +527,11 @@ declare namespace Realm {
          *
          * By default, yields all change events for this collection. You may specify at most one of
          * the `filter` or `ids` options.
+         *
+         * Important Note: To use this on React Native, you must install:
+         *
+         * 1. Polyfills for `fetch`, `ReadableStream` and `TextDecoder`: https://www.npmjs.com/package/react-native-polyfill-globals
+         * 2. Babel plugin enabling async generator syntax: https://npmjs.com/package/@babel/plugin-proposal-async-generator-functions
          *
          * @param options.filter A filter for which change events you are interested in.
          * @param options.ids A list of ids that you are interested in watching.

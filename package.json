@@ -1,7 +1,7 @@
 {
-  "name": "realm-node",
+  "name": "@ibilux/realm-node",
   "description": "Realm is a mobile database: an alternative to SQLite and key-value stores",
-  "version": "10.10.1",
+  "version": "11.0.0",
   "license": "SEE LICENSE IN LICENSE",
   "homepage": "https://realm.io",
   "keywords": [
@@ -32,31 +32,31 @@
     "types"
   ],
   "scripts": {
-    "install": "prebuild-install -r napi"
+    "install": "prebuild-install --tag-prefix= -r napi"
   },
   "dependencies": {
-    "@realm.io/common": "^0.1.1",
-    "prebuild-install": "^6.1.1"
+    "@realm/common": "^0.1.4",
+    "prebuild-install": "^7.0.1"
   },
   "devDependencies": {
     "bson": "4.4.1",
-    "realm-network-transport": "^0.7.0"
+    "@realm/network-transport": "^0.7.2"
   },
   "engines": {
-    "node": ">=10",
+    "node": ">=13",
     "npm": ">=7"
   },
   "config": {
     "runtime": "napi",
-    "target": 4
+    "target": 5
   },
   "binary": {
     "module_name": "realm",
     "host": "https://static.realm.io",
-    "package_name": "realm-v{version}-napi-v4-{platform}-{arch}.tar.gz",
+    "package_name": "realm-v{version}-napi-v5-{platform}-{arch}.tar.gz",
     "remote_path": "realm-js-prebuilds/{version}",
     "napi_versions": [
-      4
+      5
     ]
   },
   "type": "commonjs",

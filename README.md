@@ -1,6 +1,6 @@
 <picture>
-    <source srcset="./logo-dark.svg" media="(prefers-color-scheme: dark)" alt="realm by MongoDB">
-    <img src="./logo.svg" alt="realm by MongoDB">
+    <source srcset="https://raw.githubusercontent.com/ibilux/realm-node/master/logo-dark.svg" media="(prefers-color-scheme: dark)" alt="realm by MongoDB">
+    <img src="https://raw.githubusercontent.com/ibilux/realm-node/master/logo.svg" alt="realm by MongoDB">
 </picture>
 
 Realm is a mobile database that runs directly inside phones, tablets or wearables.
