@@ -2,7 +2,7 @@
   "name": "realm-node",
   "description": "Realm is a mobile database: an alternative to SQLite and key-value stores",
   "version": "10.10.1",
-  "license": "See the actual license in the file LICENSE",
+  "license": "SEE LICENSE IN LICENSE",
   "homepage": "https://realm.io",
   "keywords": [
     "database",
@@ -17,14 +17,10 @@
     "leveldb",
     "realm"
   ],
-  "author": {
-    "name": "ibilux",
-    "email": "i.bilux@gmail.com",
-    "url": "https://realm.io"
-  },
+  "author": "ibilux <i.bilux@gmail.com> (https://realm.io)",
   "repository": {
     "type": "git",
-    "url": "https://github.com/ibilux/realm-node.git"
+    "url": "git+https://github.com/ibilux/realm-node.git"
   },
   "bugs": {
     "url": "https://github.com/ibilux/realm-node/issues"
@@ -63,5 +59,8 @@
       4
     ]
   },
-  "type": "commonjs"
+  "type": "commonjs",
+  "directories": {
+    "lib": "lib"
+  }
 }
