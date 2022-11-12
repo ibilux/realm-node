@@ -1404,6 +1404,6 @@ declare class Realm {
   _updateSchema(schema: Realm.ObjectSchema[]): void;
 }
 
-declare module 'realm-node' {
+declare module '@ibilux/realm-node' {
   export = Realm;
 }
