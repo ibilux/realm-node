@@ -1,7 +1,7 @@
 {
   "name": "@ibilux/realm-node",
   "description": "Realm is a mobile database: an alternative to SQLite and key-value stores",
-  "version": "11.0.1",
+  "version": "11.0.2",
   "license": "SEE LICENSE IN LICENSE",
   "homepage": "https://realm.io",
   "keywords": [
@@ -53,8 +53,8 @@
   "binary": {
     "module_name": "realm",
     "host": "https://static.realm.io",
-    "package_name": "realm-v{version}-napi-v5-{platform}-{arch}.tar.gz",
-    "remote_path": "realm-js-prebuilds/{version}",
+    "package_name": "realm-v11.0.0-napi-v5-{platform}-{arch}.tar.gz",
+    "remote_path": "realm-js-prebuilds/11.0.0",
     "napi_versions": [
       5
     ]
